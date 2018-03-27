@@ -2,10 +2,11 @@ package com.gh0u1l5.wechatmagician.spellbook.base
 
 import com.gh0u1l5.wechatmagician.spellbook.util.BasicUtil.tryAsynchronously
 import com.gh0u1l5.wechatmagician.spellbook.util.BasicUtil.tryVerbosely
+import com.gh0u1l5.wechatmagician.spellbook.util.XposedUtil
 import de.robv.android.xposed.XC_MethodHook
 import java.util.concurrent.ConcurrentHashMap
 
-abstract class EventCenter {
+abstract class EventCenter: HookerProvider {
 
     abstract val interfaces: List<Class<*>>
 
@@ -16,6 +17,10 @@ abstract class EventCenter {
 
     private fun register(event: String, observer: Any) {
         if (observer.hasEvent(event)) {
+            val hooker = provideEventHooker(event)
+            if (hooker != null && !hooker.hasHooked) {
+                XposedUtil.postHooker(hooker)
+            }
             val added = registries[event] ?: emptySet()
             registries[event] = added + observer
         }
@@ -28,7 +33,7 @@ abstract class EventCenter {
     }
 
     fun notify(event: String, action: (Any) -> Unit) {
-        if (event == "") {
+        if (event.isEmpty()) {
             throw IllegalArgumentException("event cannot be empty!")
         }
         registries[event]?.forEach {
@@ -37,7 +42,7 @@ abstract class EventCenter {
     }
 
     fun notifyParallel(event: String, action: (Any) -> Unit) {
-        if (event == "") {
+        if (event.isEmpty()) {
             throw IllegalArgumentException("event cannot be empty!")
         }
         registries[event]?.map { observer ->
@@ -49,7 +54,7 @@ abstract class EventCenter {
      * If the hooked method has no return type, then the action may only decide whether interrupt it or not.
      */
     fun notifyWithInterrupt(event: String, param: XC_MethodHook.MethodHookParam, action: (Any) -> Boolean) {
-        if (event == "") {
+        if (event.isEmpty()) {
             throw IllegalArgumentException("event cannot be empty!")
         }
         registries[event]?.forEach {
@@ -66,7 +71,7 @@ abstract class EventCenter {
      * If the hooked method has a return type, then the action may have an general operation.
      */
     fun notifyWithOperation(event: String, param: XC_MethodHook.MethodHookParam, action: (Any) -> Operation<*>) {
-        if (event == "") {
+        if (event.isEmpty()) {
             throw IllegalArgumentException("event cannot be empty!")
         }
         var priority = -1
@@ -82,7 +87,7 @@ abstract class EventCenter {
     }
 
     fun <T: Any>notifyForResult(event: String, action: (Any) -> T?): List<T> {
-        if (event == "") {
+        if (event.isEmpty()) {
             throw IllegalArgumentException("event cannot be empty!")
         }
         return registries[event]?.mapNotNull {
