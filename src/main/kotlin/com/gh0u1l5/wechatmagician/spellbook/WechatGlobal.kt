@@ -37,7 +37,7 @@ object WechatGlobal {
     /**
      * A list holding a cache of full names for classes provided by the Wechat APK.
      */
-    @Volatile var wxClasses: List<String>? = null
+    @Volatile var wxClasses: List<ReflectionUtil.ClassName>? = null
 
     /**
      * A flag indicating whether the codes are running under unit test mode.
@@ -61,11 +61,32 @@ object WechatGlobal {
      * @param initializer the callback that actually initialize the lazy object.
      * @return a lazy object that can be used for lazy evaluation.
      */
-    fun <T> wxLazy(name: String, initializer: () -> T?): Lazy<T> = lazy {
-        if (!wxUnitTestMode) {
-            initializeChannel.wait(4000)
+    fun <T> wxLazy(name: String, initializer: () -> T?): Lazy<T> {
+        return if (wxUnitTestMode) {
+            UnitTestLazyImpl {
+                initializer() ?: throw Error("Failed to evaluate $name")
+            }
+        } else {
+            lazy {
+                initializeChannel.wait(4000)
+                initializer() ?: throw Error("Failed to evaluate $name")
+            }
         }
-        initializer() ?: throw Error("Failed to evaluate $name")
+    }
+
+    class UnitTestLazyImpl<out T>(private val initializer: () -> T): Lazy<T>, java.io.Serializable {
+        @Volatile private var lazyValue: Lazy<T> = lazy(initializer)
+
+        fun refresh() {
+            lazyValue = lazy(initializer)
+        }
+
+        override val value: T
+            get() = lazyValue.value
+
+        override fun toString(): String = lazyValue.toString()
+
+        override fun isInitialized(): Boolean = lazyValue.isInitialized()
     }
 
     /**
@@ -80,21 +101,20 @@ object WechatGlobal {
                 return@tryAsynchronously
             }
 
-            var apkFile: ApkFile? = null
             try {
                 wxVersion = getApplicationVersion(lpparam.packageName)
                 wxPackageName = lpparam.packageName
                 wxLoader = lpparam.classLoader
 
-                apkFile = ApkFile(lpparam.appInfo.sourceDir)
-                wxClasses = apkFile.dexClasses.map { clazz ->
-                    ReflectionUtil.getClassName(clazz)
+                ApkFile(lpparam.appInfo.sourceDir).use {
+                    wxClasses = it.dexClasses.map { clazz ->
+                        ReflectionUtil.ClassName(clazz.classType)
+                    }
                 }
             } catch (t: Throwable) {
                 // Ignore this one
             } finally {
                 initializeChannel.done()
-                apkFile?.close()
             }
         }
     }
